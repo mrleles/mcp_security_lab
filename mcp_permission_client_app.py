@@ -148,3 +148,81 @@ class MCPPermissionClientApp(MCPPermissionClient):
             return "No audit log entries yet."
 
         return self.audit_log_file.read_text()
+
+    def create_interface(self):
+        """Create the Gradio interface with permission management."""
+
+        with gr.Blocks(title="MCP Permission Client") as interface:
+            gr.Markdown("""
+            # MCP Permission Client
+            Manage permissions, view audit logs, and interact with MCP tools securely.
+""")
+
+            with gr.Tabs():
+                with gr.Tab("Tools"):
+                    gr.Markdown("### List and Call Tools with Permission Enforcement")
+                    with gr.Row():
+                        with gr.Column():
+                            list_tools_btn = gr.Button("List Tools", variant="primary")
+                            tools_output = gr.Textbox(label="Available Tools", lines=10)
+
+                        with gr.Column():
+                            tool_dropdown = gr.Dropdown(label="Select Tool", choices=[], interactive=True)
+
+                            tool_args = gr.Textbox(
+                                label="Arguments (JSON)",
+                                placeholder='{"filepath": "test.txt"}',
+                                lines=3
+                            )
+                            with gr.Row():
+                                call_tool_btn = gr.Button("Call Tool", variant="primary")
+                                approve_tool_btn = gr.Button("Approve & Execute", variant="secondary")
+                                tool_result = gr.Textbox(label="Result", lines=10)
+
+                        list_tools_btn.click(
+                            fn=self.gui_list_tools,
+                            outputs=[tools_output, tool_dropdown]
+                        )
+
+                        call_tool_btn.click(
+                            fn=self.gui_call_tool,
+                            inputs=[tool_dropdown, tool_args],
+                            outputs=tool_result
+                        )
+
+                        async def gui_approve_tool(tool_selection, arguments_json):
+                            return await self.gui_call_tool(tool_selection, arguments_json, approved=True)
+
+                        approve_tool_btn.click(
+                            fn=gui_approve_tool,
+                            inputs=[tool_dropdown, tool_args],
+                            outputs=tool_result
+                        )
+
+                with gr.Tab("Resources"):
+                    gr.Markdown("### List and Read Resources")
+                    with gr.Row():
+                        with gr.Column():
+                            list_resources_btn = gr.Button("List Resources", variant="primary")
+                            resources_output = gr.Textbox(label="Available Resources", lines=10)
+
+                        with gr.Column():
+                            resource_uri = gr.Textbox(
+                                label="Resource URI",
+                                placeholder="file://audit/log"
+                            )
+                            read_resource_btn = gr.Button("Read Resource", variant="primary")
+                            resource_content = gr.Textbox(label="Resource Content", lines=10)
+
+                    list_resources_btn.click(
+                        fn=self.gui_list_resources,
+                        outputs=resources_output
+                    )
+
+                    read_resource_btn.click(
+                        fn=self.gui_read_resource,
+                        inputs=resource_uri,
+                        outputs=resource_content
+                    )
+
+                with gr.Tab("Prompts"):
