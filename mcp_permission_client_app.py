@@ -156,7 +156,7 @@ class MCPPermissionClientApp(MCPPermissionClient):
             gr.Markdown("""
             # MCP Permission Client
             Manage permissions, view audit logs, and interact with MCP tools securely.
-""")
+            """)
 
             with gr.Tabs():
                 with gr.Tab("Tools"):
@@ -226,3 +226,91 @@ class MCPPermissionClientApp(MCPPermissionClient):
                     )
 
                 with gr.Tab("Prompts"):
+                    gr.Markdown("### List ang Get Prompts")
+                    with gr.Row():
+                        with gr.Column():
+                            list_prompts_btn = gr.Button("List Prompts", variant="primary")
+                            prompts_output = gr.Textbox(label="Available Prompts", lines=5)
+
+                        with gr.Column():
+                            prompt_dropdown = gr.Dropdown(label="Select Prompt", choices=[], interactive=True)
+                            prompt_args = gr.Textbox(
+                                label="Arguments (JSON)",
+                                placeholder='{"operation": "write_file", "risk_level": "MEDIUM"}',
+                                lines=2
+                            )
+                            get_prompts_btn = gr.Button("Get Prompt", variant="primary")
+                            prompt_result = gr.Textbox(label="Prompt Messages", lines=10)
+
+                    list_prompts_btn.click(
+                        fn=self.gui_list_prompts,
+                        outputs=[prompts_output, prompt_dropdown]
+                    )
+
+                    get_prompts_btn.click(
+                        fn=self.gui_list_prompts,
+                        inputs=[prompts_output, prompt_args],
+                        outputs=prompt_result
+                    )
+
+                with gr.Tab("Permissions"):
+                    gr.Markdown("### Manage Permissions and View Audit Log")
+                    with gr.Row():
+                        with gr.Column():
+                            gr.Markdown("**Configure Tool Permission**")
+                            list_tools_for_perm_btn = gr.Button("Load Tools", size="sm")
+                            perm_tool_name = gr.Dropdown(
+                                label="Tool Name",
+                                choices=[],
+                                allow_custom_value=True
+                            )
+                            perm_policy = gr.Radio(
+                                choices=["allow", "deny", "ask"],
+                                label="Permission Policy",
+                                value="ask"
+                            )
+                            save_perm_btn = gr.Button("Save Permission", variant="primary")
+                            perm_result = gr.Textbox(label="Result", lines=3)
+
+                        with gr.Column():
+                            gr.Markdown("**Audit Log**")
+                            view_audit_btn = gr.Button("View Audit Log", variant="secondary")
+                            audit_output = gr.Textbox(label="Audit Log", lines=15)
+
+                    async def load_tools_for_dropdown():
+                        tools = await self.list_tools()
+                        tool_names = [tool.name for tool in tools]
+                        return gr.Dropdown(choices=tool_names)
+
+                    list_tools_for_perm_btn.click(
+                        fn=load_tools_for_dropdown,
+                        outputs=perm_tool_name
+                    )
+
+                    save_perm_btn.click(
+                        fn=self.gui_configure_permission,
+                        inputs=[perm_tool_name, perm_policy],
+                        outputs=perm_result
+                    )
+
+                    view_audit_btn.click(
+                        fn=self.gui_view_audit_log,
+                        outputs=audit_output
+                    )
+
+        return interface
+
+    def main():
+        if len(sys.argv) < 2:
+            print("Usage: python mcp_permission_client_app.py <server_script>")
+            print("Example: python mcp_permission_client_app.py mcp_permission_server.py")
+            sys.exit(1)
+
+        server_script = sys.argv[1]
+
+        client = MCPPermissionClientApp(server_script)
+        interface = client.create_interface()
+        interface.queue().launch(server_name="127.0.0.1", server_port=7863)
+
+    if __name__ == "__main__":
+        main()
