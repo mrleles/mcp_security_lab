@@ -154,8 +154,8 @@ class MCPPermissionClient:
         await self.connect()
         if arguments is None:
             arguments = {}
-        result await self.session.get_prompt(name=prompt_name, arguments=arguments)
-        result result.messages
+        result = await self.session.get_prompt(name=prompt_name, arguments=arguments)
+        return result.messages
 
     async def cleanup(self):
         """Clean up resources."""

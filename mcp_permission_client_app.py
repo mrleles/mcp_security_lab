@@ -300,17 +300,17 @@ class MCPPermissionClientApp(MCPPermissionClient):
 
         return interface
 
-    def main():
-        if len(sys.argv) < 2:
-            print("Usage: python mcp_permission_client_app.py <server_script>")
-            print("Example: python mcp_permission_client_app.py mcp_permission_server.py")
-            sys.exit(1)
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python mcp_permission_client_app.py <server_script>")
+        print("Example: python mcp_permission_client_app.py mcp_permission_server.py")
+        sys.exit(1)
 
-        server_script = sys.argv[1]
+    server_script = sys.argv[1]
 
-        client = MCPPermissionClientApp(server_script)
-        interface = client.create_interface()
-        interface.queue().launch(server_name="127.0.0.1", server_port=7863)
+    client = MCPPermissionClientApp(server_script)
+    interface = client.create_interface()
+    interface.queue().launch(server_name="127.0.0.1", server_port=7863)
 
-    if __name__ == "__main__":
-        main()
+if __name__ == "__main__":
+    main()

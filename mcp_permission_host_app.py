@@ -85,4 +85,375 @@ class MCPPermissionHostApp(MCPPermissionClient):
             }
         })
 
-        #TODO Step 2c: Get Available Tools - Synthetic Prompt Tools
+        # Add synthetic tools for prompts
+        openai_tools.append({
+            "type": "function",
+            "function": {
+                "name": "mcp_list_prompts",
+                "description": "List all available prompt templates from the MCP server",
+                "parameters": {
+                    "type": "object",
+                    "properties": {}
+                }
+            }
+        })
+
+        openai_tools.append({
+            "type": "function",
+            "function": {
+                "name": "mcp_get_prompt",
+                "description": "Get a rendered prompt template from the MCP server",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "The name of the prompt template"
+                        },
+                        "arguments": {
+                            "type": "object",
+                            "description": "Arguments for the prompt template"
+                        }
+                    },
+                    "required": ["name"]
+                }
+            }
+        })
+
+        return openai_tools
+
+    async def execute_tool(self, tool_name: str, arguments: dict):
+        """Execute a tool call with permission checking (real MCP tool or synthetic helper)."""
+        await self.connect()
+
+        if tool_name == "mcp_list_resources":
+            resources = await self.list_resources()
+            result = "Available resources:\n"
+            for resource in resources:
+                result += f"- {resource.uri}"
+                if resource.name:
+                    result += f" ({resource.name})"
+                if resource.description:
+                    result += f" ({resource.description})"
+                result += "\n"
+            return result
+
+        if tool_name == "mcp_read_resource":
+            uri = arguments.get("uri")
+            if not uri:
+                return "Error: URI is required"
+            try:
+                contents = await self.read_resources(uri)
+                if isinstance(contents, list) and len(contents) > 0:
+                    content = contents[0]
+                    if hasattr(content, 'text'):
+                        return content.text
+                    return str(content)
+                return str(contents)
+            except Exception as e:
+                return f"Error reading resource: {str(e)}"
+
+        if tool_name == "mcp_list_prompts":
+            prompts = await self.list_prompts()
+            result = "Available prompts:\n"
+            for prompt in prompts:
+                result += f"- {prompt.name}"
+                if prompt.description:
+                    result += f": {prompt.description}"
+                if hasattr(prompt, 'arguments') and prompt.arguments:
+                    args = [arg.name for arg in prompt.arguments]
+                    result += f" (args: {', '.join(args)})"
+                result += "\n"
+            return result
+
+        if tool_name == "mcp_get_prompt":
+            name = arguments.get("name")
+            prompt_args = arguments.get("arguments", {})
+            if not name:
+                return "Error: Prompt name is required"
+            try:
+                messages = await self.get_prompt(name, prompt_args)
+                result = f"Prompt: {name}\n\n"
+                for msg in messages:
+                    role = getattr(msg, 'role', 'unknown')
+                    content = getattr(msg, 'content', '')
+                    if hasattr(content, 'text'):
+                        content = content.text
+                    result += f"[{role}]: {content}\n\n"
+                return result
+            except Exception as e:
+                return f"Error getting prompt: {str(e)}"
+
+        try:
+            result = await self.call_tool_with_permission(tool_name, arguments)
+
+            if isinstance(result, list) and len(result) > 0:
+                content = result[0]
+                if hasattr(content, 'text'):
+                    result_text = content.text
+
+                    if "Permission required for tool:" in result_text and "Please approve this operation" in result_text:
+                        self.pending_approval = {
+                            "tool_name": tool_name,
+                            "arguments": arguments
+                        }
+                    return result_text
+                return str(content)
+            if hasattr(result, 'text'):
+                return result.text
+
+            return str(result)
+
+        except Exception as e:
+            return f"Error executing tool: {str(e)}"
+
+    def assess_risk(self, tool_name: str, arguments: dict) -> dict:
+        """Assess the risk level of a tool operation."""
+        risk_level = self.risk_levels.get(tool_name, "medium")
+        permission = self.permission.get(tool_name, "ask")
+
+        assessment = {
+            "tool": tool_name,
+            "risk_level": risk_level,
+            "permission": permission,
+            "requires_approval": permission in ["ask", "deny"],
+            "description": ""
+        }
+
+        if risk_level == "low":
+            assessment["description"] = "Safe operation with minimal impact"
+        elif risk_level == "medium":
+            assessment["description"] = "Moderate impact - modifies data"
+        elif risk_level == "high":
+            assessment["description"] = "High impact - desctructive operation"
+        elif risk_level == "critical":
+            assessment["description"] = "Critical impact - system-level operation"
+
+        return assessment
+
+    async def chat(self, user_message: str, history: list):
+        """Chat with the LLM using permission-aware MCP tools."""
+        await self.connect()
+
+        if self.pending_approval and user_message.strip().lower() in ["yes", "approve", "ok", "confirm", "y"]:
+            tool_name = self.pending_approval["tool_name"]
+            arguments = self.pending_approval["arguments"]
+            self.pending_approval = None
+
+            try:
+                result = await self.call_tool_with_permission(tool_name, arguments, approved=True)
+
+                if isinstance(result, list) and len(result) > 0:
+                    content = result[0]
+                    if hasattr(content, 'text'):
+                        response_text = f"Operation approved and executed.\n\n{content.text}"
+                    else:
+                        response_text = f"Operation approved and executed.\n\n{str(content)}"
+                else:
+                    response_text = f"Operation approved and executed.\n\n{str(result)}"
+
+                self.conversation_history.append({
+                    "role": "user",
+                    "content": user_message
+                })
+                self.conversation_history.append({
+                    "role": "assistant",
+                    "content": response_text
+                })
+
+                return response_text
+
+            except Exception as e:
+                error_msg = f"Error executing approved operation: {str(e)}"
+                self.conversation_history.append({
+                    "role": "user",
+                    "content": user_message
+                })
+                self.conversation_history.append({
+                    "role": "assistant",
+                    "content": error_msg
+                })
+                return error_msg
+
+        if self.pending_approval and user_message.strip().lower() in ["no", "deny", "cancel", "n"]:
+            self.pending_approval = None
+            response_text = "Operation cancelled by user."
+
+            self.conversation_history.append({
+                "role": "user",
+                "content": user_message
+            })
+            self.conversation_history.append({
+                "role": "assistant",
+                "content": response_text
+            })
+
+            return response_text
+
+        self.conversation_history.append({
+            "role": "user",
+            "content": user_message
+        })
+
+        tools = await self.get_available_tools()
+
+        if tools:
+            response = self.llm_client.chat.completions.create(
+                model=self.model,
+                messages=self.conversation_history,
+                tools=tools,
+                tool_choice="auto"
+            )
+        else:
+            response = self.llm_client.chat.completions.create(
+                model=self.model,
+                messages=self.conversation_history
+            )
+
+        if not response or not response.choices:
+            return "Error: No response from LLM"
+
+        assistant_message = response.choices[0].message
+
+        if assistant_message.tool_call:
+            self.conversation_history.append({
+                "role": "assistant":
+                "content": assistant_message.content or "",
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.function_name,
+                            "arguments": tc.function.arguments
+                        }
+                    }
+                    for tc in assistant_message.tool_calls
+                ]
+            })
+
+            for tool_call in assistant_message.tool_calls:
+                function_name = tool_call.function.name
+                function_args = json.loads(tool_call.function.arguments)
+
+                risk_assessment = self.assess_risk(function_name, function_args)
+
+                tool_result = await self.execute_tool(function_name, function_args)
+
+                self.conversation_history.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": str(tool_result)
+                })
+
+            final_response = self.llm_client.chat.completions.create(
+                model=self.model,
+                messages=self.conversation_history
+            )
+
+            if not final_response or not final_response.choices:
+                return "Error: No response from LLM after tool execution"
+
+            final_message = final_response.choices[0].message.content
+            self.conversation_history.append({
+                "role": "assistant",
+                "content": final_message
+            })
+
+            return final_message
+
+        else:
+            self.conversation_history.append({
+                "role": "assistant",
+                "content": assistant_message.content
+            })
+
+            return assistant_message.content
+
+    def create_interface(self):
+        """Create the Gradio chat interface with permission awareness."""
+
+        async def chat_wrapper(message, history):
+            """Wrapper for chat method compatible with Gradio."""
+            if not message.strip():
+                return history
+
+            response = await self.chat(message, history)
+
+            return history + [
+                {"role": "user", "content": message},
+                {"role": "assistant", "content": response}
+            ]
+
+        async def reset_conversation():
+            """Reset the conversation history."""
+            self.conversation_history = []
+            return []
+
+        with gr.Blocks(title="MCP Permission AI Host") as interface:
+            gr.Markdown(f"""
+            # MCP Permission AI Host
+            Chat with GPT-4o-mini using permission-aware MCP tools.
+
+            **Model:** {self.model}
+            **Permissions:** Enforced with audit logging
+            **Risk Assessment:** Automatic for all operations
+
+            All tool executions are subject to permission policies and logged to the audit trail.
+            """)
+
+            chatbot = gr.Chatbot(
+                label="Conversation",
+                height=500,
+                type="messages"
+            )
+
+            with gr.Row():
+                msg = gr.Textbox(
+                    label="Your message",
+                    placeholder="Ask me to use MCP tools...",
+                    scale=4
+                )
+                clear = gr.Button("Clear", scale=1)
+
+            with gr.Accordion("Permission Status", open=False):
+                perm_info = gr.Markdown(self._get_permission_summary())
+
+            msg.submit(
+                fn=chat_wrapper,
+                inputs=[msg, chatbot],
+                outputs=chatbot
+            ).then(
+                lambda: "",
+                outputs=msg
+            )
+
+            clear.click(
+                fn=reset_conversation,
+                outputs=chatbot
+            )
+
+        return interface
+
+    def _get_permission_summary(self) -> str:
+        """Generate a summary of current permissions."""
+        summary = "### Current Permission Policies:\n\n"
+        for tool, policy in self.permissions.items():
+            risk = self.risk_levels.get(tool, "medium")
+            summary += f"- **{tool}**: {policy.upper()} (Risk: {risk})\n"
+        return summary
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python mcp_permission_host_app.py <server_script>")
+        print("Example: python mcp_permission_host_app.py mcp_permission_server.py")
+        sys.exit(1)
+
+    server_script = sys.argv[1]
+
+    client = MCPPermissionHostApp(server_script)
+    interface = client.create_interface()
+    interface.queue().launch(server_name="1270.0.0.1", server_port=7864)
+
+if __name__ == "__main__":
+    main()

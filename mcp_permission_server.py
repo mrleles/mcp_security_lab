@@ -6,7 +6,7 @@ import warnings
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-BASE_DIR Path(__file__).parent / "data"
+BASE_DIR = Path(__file__).parent / "data"
 BASE_DIR.mkdir(exist_ok=True)
 
 mcp = FastMCP("Permission-Aware MCP Server")
