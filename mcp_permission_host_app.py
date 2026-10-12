@@ -210,7 +210,7 @@ class MCPPermissionHostApp(MCPPermissionClient):
     def assess_risk(self, tool_name: str, arguments: dict) -> dict:
         """Assess the risk level of a tool operation."""
         risk_level = self.risk_levels.get(tool_name, "medium")
-        permission = self.permission.get(tool_name, "ask")
+        permission = self.permissions.get(tool_name, "ask")
 
         assessment = {
             "tool": tool_name,
@@ -315,16 +315,16 @@ class MCPPermissionHostApp(MCPPermissionClient):
 
         assistant_message = response.choices[0].message
 
-        if assistant_message.tool_call:
+        if assistant_message.tool_calls:
             self.conversation_history.append({
-                "role": "assistant":
+                "role": "assistant",
                 "content": assistant_message.content or "",
                 "tool_calls": [
                     {
                         "id": tc.id,
                         "type": "function",
                         "function": {
-                            "name": tc.function_name,
+                            "name": tc.function.name,
                             "arguments": tc.function.arguments
                         }
                     }
@@ -453,7 +453,7 @@ def main():
 
     client = MCPPermissionHostApp(server_script)
     interface = client.create_interface()
-    interface.queue().launch(server_name="1270.0.0.1", server_port=7864)
+    interface.queue().launch(server_name="127.0.0.1", server_port=7864)
 
 if __name__ == "__main__":
     main()

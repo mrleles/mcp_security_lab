@@ -38,7 +38,7 @@ class MCPPermissionClientApp(MCPPermissionClient):
         if not tool_selection:
             return "Please select a tool first"
 
-        tool_name = tool_selection.split(" ("[0])
+        tool_name = tool_selection.split(" (")[0]
 
         try:
             arguments = json.loads(arguments_json) if arguments_json.strip() else {}
